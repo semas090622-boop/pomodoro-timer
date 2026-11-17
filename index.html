@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>포모도로 타이머</title>
+<style>
+  :root { --bg:#fff5f3; --fg:#3a2420; --accent:#e5533d; --track:#f3d6d0; --card:#ffffff; }
+  body.break { --bg:#eefaf3; --accent:#2f9e63; --track:#cfe9da; }
+  body.long { --bg:#eef3fd; --accent:#3b6fd4; --track:#cddaf3; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:flex; align-items:center; justify-content:center;
+    background:var(--bg); color:var(--fg); font-family:"Malgun Gothic",system-ui,sans-serif; transition:background .4s; }
+  .card { background:var(--card); border-radius:24px; padding:32px; width:min(92vw,380px);
+    box-shadow:0 10px 40px rgba(0,0,0,.08); text-align:center; }
+  .modes { display:flex; gap:6px; margin-bottom:24px; }
+  .modes button { flex:1; padding:8px 0; border:0; border-radius:10px; background:var(--track);
+    color:var(--fg); cursor:pointer; font-size:14px; }
+  .modes button.active { background:var(--accent); color:#fff; }
+  .ring { position:relative; width:240px; height:240px; margin:0 auto 20px; }
+  .ring svg { transform:rotate(-90deg); }
+  .ring circle { fill:none; stroke-width:12; }
+  .ring .bg { stroke:var(--track); }
+  .ring .fg { stroke:var(--accent); stroke-linecap:round; transition:stroke-dashoffset .3s linear; }
+  .time { position:absolute; inset:0; display:flex; align-items:center; justify-content:center;
+    font-size:56px; font-weight:700; font-variant-numeric:tabular-nums; }
+  .controls { display:flex; gap:10px; justify-content:center; }
+  .controls button { padding:12px 28px; border:0; border-radius:12px; font-size:16px; cursor:pointer; }
+  #start { background:var(--accent); color:#fff; min-width:110px; }
+  #reset { background:var(--track); color:var(--fg); }
+  .info { margin-top:20px; font-size:14px; opacity:.75; }
+  .settings { margin-top:18px; display:flex; gap:8px; justify-content:center; font-size:13px; }
+  .settings label { display:flex; flex-direction:column; gap:4px; }
+  .settings input { width:62px; padding:6px; border:1px solid var(--track); border-radius:8px; text-align:center; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="modes">
+    <button data-mode="work" class="active">집중</button>
+    <button data-mode="break">짧은 휴식</button>
+    <button data-mode="long">긴 휴식</button>
+  </div>
+  <div class="ring">
+    <svg width="240" height="240" viewBox="0 0 240 240">
+      <circle class="bg" cx="120" cy="120" r="108"/>
+      <circle class="fg" id="fg" cx="120" cy="120" r="108"/>
+    </svg>
+    <div class="time" id="time">25:00</div>
+  </div>
+  <div class="controls">
+    <button id="start">시작</button>
+    <button id="reset">리셋</button>
+  </div>
+  <div class="info" id="info">완료한 포모도로: 0개</div>
+  <div class="settings">
+    <label>집중(분)<input type="number" id="s-work" value="25" min="1" max="120"></label>
+    <label>휴식(분)<input type="number" id="s-break" value="5" min="1" max="60"></label>
+    <label>긴 휴식(분)<input type="number" id="s-long" value="15" min="1" max="120"></label>
+  </div>
+</div>
+<script>
+const C = 2 * Math.PI * 108;
+const fg = document.getElementById('fg');
+fg.style.strokeDasharray = C;
+const $ = id => document.getElementById(id);
+let mode = 'work', total, left, timer = null, endAt = 0, done = 0;
+
+const mins = m => +$('s-' + m).value * 60;
+
+function setMode(m) {
+  mode = m;
+  document.body.className = m === 'work' ? '' : m;
+  document.querySelectorAll('.modes button').forEach(b => b.classList.toggle('active', b.dataset.mode === m));
+  stop();
+  total = left = mins(m);
+  render();
+}
+function render() {
+  const mm = String(Math.floor(left / 60)).padStart(2, '0');
+  const ss = String(left % 60).padStart(2, '0');
+  $('time').textContent = mm + ':' + ss;
+  document.title = mm + ':' + ss + ' - 포모도로';
+  fg.style.strokeDashoffset = C * (1 - left / total);
+  $('info').textContent = '완료한 포모도로: ' + done + '개';
+}
+function stop() {
+  clearInterval(timer); timer = null;
+  $('start').textContent = '시작';
+}
+function beep() {
+  try {
+    const a = new (window.AudioContext || window.webkitAudioContext)();
+    [0, .3, .6].forEach(t => {
+      const o = a.createOscillator(), g = a.createGain();
+      o.connect(g); g.connect(a.destination); o.frequency.value = 880;
+      g.gain.setValueAtTime(.2, a.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(.001, a.currentTime + t + .25);
+      o.start(a.currentTime + t); o.stop(a.currentTime + t + .25);
+    });
+  } catch (e) {}
+}
+function tick() {
+  left = Math.max(0, Math.round((endAt - Date.now()) / 1000));
+  render();
+  if (left === 0) {
+    beep();
+    if (mode === 'work') { done++; setMode(done % 4 === 0 ? 'long' : 'break'); }
+    else setMode('work');
+    if (Notification.permission === 'granted')
+      new Notification(mode === 'work' ? '집중할 시간!' : '휴식 시간!');
+  }
+}
+$('start').onclick = () => {
+  if (timer) { stop(); return; }
+  if ('Notification' in window && Notification.permission === 'default') Notification.requestPermission();
+  endAt = Date.now() + left * 1000;
+  timer = setInterval(tick, 250);
+  $('start').textContent = '일시정지';
+};
+$('reset').onclick = () => setMode(mode);
+document.querySelectorAll('.modes button').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+['work','break','long'].forEach(m => $('s-' + m).onchange = () => { if (!timer && mode === m) setMode(m); });
+setMode('work');
+</script>
+</body>
+</html>
